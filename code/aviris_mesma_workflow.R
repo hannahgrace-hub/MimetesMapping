@@ -13,7 +13,8 @@ aviris_tif <- "/absolute/path/to/aviris_ng_cube.tif"
 aoi_geojson <- "/absolute/path/to/aoi.geojson"
 points_file <- "/absolute/path/to/sample_points.geojson" # points for extraction
 
-# Example AVIRIS-NG band choices (update to your wavelength-to-band mapping):
+# Example AVIRIS-NG band choices. Update these to your wavelength-to-band mapping
+# from the AVIRIS-NG metadata/header for your specific scene.
 band_nir <- 50L
 band_red <- 30L
 band_green <- 20L
@@ -45,7 +46,8 @@ ndvi <- (nir - red) / (nir + red)
 names(ndvi) <- "NDVI"
 
 # EVI = 2.5 * (NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1)
-# If you have a blue band, substitute it below. We use green as a placeholder.
+# If you have a blue band, substitute it below.
+# Using green here is demonstration-only and not scientifically equivalent to blue.
 evi <- 2.5 * (nir - red) / (nir + 6 * red - 7.5 * green + 1)
 names(evi) <- "EVI"
 
@@ -61,14 +63,15 @@ pts <- vect(points_file)
 # Extract vegetation index values and selected AVIRIS bands to points.
 index_at_points <- extract(veg_indices, pts)
 bands_at_points <- extract(c(nir, red, green, swir), pts)
+spectra_at_points <- extract(aviris_mask, pts)
 
 # Combine outputs (ID column comes from terra::extract)
 point_data <- merge(index_at_points, bands_at_points, by = "ID")
 
 # ---- MESMA analysis with luna -----------------------------------------------
-# Build a simple library matrix from extracted band values
-# (rows = samples, columns = bands). In practice, replace with known endmembers.
-spectral_library <- as.matrix(na.omit(point_data[, c("nir", "red", "green", "swir")]))
+# Build a spectral library matrix from extracted full spectra at points
+# (rows = samples, columns = AVIRIS bands). Replace with known endmembers as needed.
+spectral_library <- as.matrix(na.omit(spectra_at_points[, -1, drop = FALSE]))
 
 # MESMA requires image spectra and candidate endmember spectra.
 # Convert the cropped raster to a matrix where rows are pixels and columns are bands.
@@ -78,7 +81,7 @@ img_values <- img_values[complete.cases(img_values), , drop = FALSE]
 # Example MESMA call. Adjust arguments to your luna version/data:
 # - image: matrix of pixel spectra
 # - emlib: matrix of endmember spectra
-# - n: number of endmembers in each model
+# - n: number of endmembers in each model (set based on expected material mixing)
 mesma_result <- mesma(
   image = img_values,
   emlib = spectral_library,
