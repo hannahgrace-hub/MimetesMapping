@@ -71,10 +71,13 @@ point_data <- merge(index_at_points, bands_at_points, by = "ID")
 # ---- MESMA analysis with luna -----------------------------------------------
 # Build a spectral library matrix from extracted full spectra at points
 # (rows = samples, columns = AVIRIS bands). Replace with known endmembers as needed.
-spectral_library <- as.matrix(na.omit(spectra_at_points[, -1, drop = FALSE]))
+spectral_library <- as.matrix(
+  na.omit(spectra_at_points[, !names(spectra_at_points) %in% "ID", drop = FALSE])
+)
 
 # MESMA requires image spectra and candidate endmember spectra.
 # Convert the cropped raster to a matrix where rows are pixels and columns are bands.
+# For very large scenes this can be memory-intensive; consider tiled/chunked workflows.
 img_values <- values(aviris_mask, mat = TRUE)
 img_values <- img_values[complete.cases(img_values), , drop = FALSE]
 
