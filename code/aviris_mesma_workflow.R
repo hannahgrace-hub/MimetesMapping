@@ -88,6 +88,7 @@ if (nrow(spectral_library) < 1) {
 # Convert the cropped raster to a matrix where rows are pixels and columns are bands.
 # For very large scenes this can be memory-intensive; consider tiled/chunked workflows.
 # Threshold is count of values (pixels x bands), not bytes.
+# 5e7 values is ~400 MB as 8-byte numerics; tune this to your available RAM.
 max_values_in_memory <- 5e7
 if ((ncell(aviris_mask) * nlyr(aviris_mask)) > max_values_in_memory) {
   stop("Scene is too large for full in-memory MESMA example; use a chunked workflow.")
@@ -99,6 +100,7 @@ img_values <- img_values[complete.cases(img_values), , drop = FALSE]
 # - image: matrix of pixel spectra
 # - emlib: matrix of endmember spectra
 # - n: number of endmembers in each model (set based on expected material mixing)
+#   (2 is a simple default; increase when pixels are expected to mix more materials)
 mesma_result <- mesma(
   image = img_values,
   emlib = spectral_library,
