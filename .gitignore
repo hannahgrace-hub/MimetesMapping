@@ -51,3 +51,6 @@ rsconnect/
 # Big data
 data/aviris_*
 data/silvermine 1.las
+
+# Ignore all files in any directory named temp
+index_files/
