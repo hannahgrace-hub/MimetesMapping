@@ -1,10 +1,10 @@
 ---
 title: "Remote Sensing of Biodiversity"
 format: html
-editor: visual
+toc: true
 ---
 
-## Introduction
+# Introduction
 
 This tutorial is a soft introduction to remote sensing of biodiversity using hyperspectral imagery. The example is exploring our ability to map two large shrub species (_Mimetes fimbriifolius_ and _Leucospermum conocarpodendron_) in the Silvermine section of Table Mountain National Park, South Africa, using AVIRIS-NG data. 
 
@@ -30,7 +30,8 @@ library(broom) # For tidying model outputs
 library(terra) # For handling raster and vector data
 library(luna) # A new companion package for terra, but specifically designed for remote sensing analyses
 library(mapview) # A useful package for interactive spatial data visualization
-library(GGally) # For visualizing relationships between variables
+library(spectrolab) # For handling and analyzing leaf-level spectral data
+library(patchwork) # For combining multiple ggplots into one figure
 ```
 
 
@@ -75,7 +76,9 @@ aviris <- mask( # Mask raster by area of interest (AOI) boundary
 ```
 
 
-# Vegetation indices 
+# Multispectral image analysis
+
+## Vegetation indices 
 
 Before we get into hyperspectral analyses, let's calculate some common vegetation indices that can be derived from the AVIRIS-NG data. These are essentially the way you would analyse traditional multispectral data that you get from existing satellite missions like Landsat, MODIS or Sentinel and can be a useful first step to explore the data and identify areas of interest.
 
@@ -400,3 +403,61 @@ plot(shrub_mesma_result$Mimetes < shrub_mesma_result$Leucospermum, legend = FALS
 
 Unfortunately, we don't have enough field data to do a proper validation analysis and see if our results are any good...
 
+# Leaf spectroscopy
+
+Typically, to differentiate between plant species using hyperspectral data, you would want to collect leaf-level spectra using a field spectrometer with a leaf clip attachment. This allows you to get pure spectra of the leaves of each species, which can then be used determine whether the species have unique spectral signatures and whether you would expect to be able to discern and map them using hyperspectral imagery. If the species do have unique spectral signatures, you can even use these spectra as endmembers in your spectral mixture analysis. The leaf-level spectra are less influenced by factors such as canopy structure, background soil reflectance, and atmospheric effects, which can make it easier to differentiate between species compared to using spectra extracted from airborne or satellite imagery.
+
+Here we've collected leaf spectra from 12 samples (two readings from each of 6 leaves) of each of our focal species and another less common tree from a different family, _Euclea racemosa_ (Ebenaceae),  using a Spectral Evolution PSR+ field spectrometer with a leaf clip attachment. We will read them into R and plot to see if there are any differences in the spectral signatures between the three species. To process the data and plot the spectral signatures of the three species, we will use the `spectrolab` package to handle and analyze the leaf-level spectral data.
+
+```{r}
+## Get data
+sdat = read_spectra(path = "data/spectra", extract_metadata = TRUE)
+
+sdat
+```
+<br>
+
+Next we need to mormalise the spectra to account for any measurement differences between the samples, and then extract metadata from the filenames to create a metadata table that we can use for further analyses.
+
+```{r}
+# Normalise spectra
+sdat <- normalize(sdat)
+
+# Extract metadata from filename
+mdat <- separate_wider_delim(as.data.frame(names(sdat)), 
+                             cols = "names(sdat)", 
+                             delim = "_", 
+                             names = c("Species", "Replicate")) 
+```
+
+Now to do a principal coordinates analysis (PCA) on the leaf spectra to see if the three species can be separated in the PCA space. This will allow us to visualize the differences in the spectral signatures of the three species and see if they are distinct enough to be differentiated using hyperspectral data.
+
+```{r}
+## PCA
+
+# Prep data
+lib <- data.frame(as.matrix(sdat$value)) |>
+  bind_cols(mdat) # Note that binds by row number, so the order of the metadata must match the order of the spectra in the spectrolab object
+
+# Do PCA
+hyp.pca <- prcomp(lib |> select(starts_with("X")), center = TRUE, scale. = TRUE)
+
+# Augment data with PCA results and original groupings
+pca_data <- augment(hyp.pca, lib)
+
+# Plot PCA axes 1 and 2 with ellipses
+pca_data |>
+  #select(Species, starts_with(".fitted")) |>
+  #pivot_longer(cols = starts_with(".fitted"), names_to = "PC", values_to = "Value") |>
+  ggplot(aes(x = .fittedPC1, y = .fittedPC2, color = Species)) +
+  geom_point() +
+  stat_ellipse() + # Adds 95% confidence ellipses
+  theme_minimal() +
+  labs(title = "PCA of leaf spectra by species",
+       x = "PC1",
+       y = "PC2")
+```
+
+<br>
+
+It looks like there is some degree of differentiation between the three species along the first two principal components. This suggests that it should be possible to differentiate between the two focal species using hyperspectral data, especially when the variation in the higher PC axes is also considered, but further analyses and validation would be needed to confirm this.
