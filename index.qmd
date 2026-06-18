@@ -9,18 +9,20 @@ editor: visual
 This tutorial is a soft introduction to remote sensing of biodiversity using hyperspectral imagery. The example is exploring our ability to map two large shrub species (_Mimetes fimbriifolius_ and _Leucospermum conocarpodendron_) in the Silvermine section of Table Mountain National Park, South Africa, using AVIRIS-NG data. 
 
 Fires:
-- Peck's Balley to the North East, 11th November 2023
+
+- Peck's Valley to the North East, 11th November 2023
+- Below Spes Bona forest, Dec 2023/Jan 2024
 - Small patch of Mimete's Valley, 1st December 2024
 - Most of Silvermine - 28th April 2025
 
-The analyses use the `terra` and `luna` package to process and analyze hyperspectral remote sensing data for biodiversity applications. We will be working with AVIRIS-NG data from the Silvermine area in the Cape Peninsula, South Africa, collected as part of the BioSCape Campaign. The tutorial will cover data loading, preprocessing, and basic analysis techniques to extract meaningful information about biodiversity from the hyperspectral imagery.
+The analyses use the `terra` and `luna` package to process and analyze hyperspectral remote sensing data for biodiversity applications. We will be working with AVIRIS-NG data from the Silvermine area in the Cape Peninsula, South Africa, collected as part of the BioSCape Campaign on the 26 November 2023 (i.e. after one of the 4 fires). The tutorial will cover data loading, preprocessing, and basic analysis techniques to extract meaningful information about biodiversity from the hyperspectral imagery.
 
 
 ## Setup
 
-Install and call the libraries we need. Note that library(luna) was not on CRAN at the time of writing, so you need to install it from the R Spatial Universe repository. You only need to do this once, but you will need to call `library(luna)` every time you start a new R session.
+First to install and call the libraries we need. Note that `library(luna)` was not on CRAN at the time of writing, so you need to install it from the R Spatial Universe repository. You only need to do this once, but you will need to call `library(luna)` every time you start a new R session, as for all packages.
 
-```{r}
+```{r, messages = FALSE, warning = FALSE}
 # install.packages('luna', repos='https://rspatial.r-universe.dev')
 
 library(tidyverse) # For general data handling
@@ -34,7 +36,9 @@ library(GGally) # For visualizing relationships between variables
 
 ## Data description
 
-The data used in this tutorial is from the Airborne Visible/Infrared Imaging Spectrometer - Next Generation (AVIRIS-NG) sensor, which provides high-resolution hyperspectral imagery (imaging spectroscopy). The specific dataset we are using is from the Silvermine area in the Cape Peninsula, South Africa, collected as part of the BioSCape Campaign (www.bioscape.io) on the 26th November 2023. The ground sample distance (spatial resolution) is 2m. The AVIRIS data are provided in NetCDF format and can be accessed [here]() (±600MB). We also have an Area of Interest (AOI) defined as a GeoJSON file and a set of points for extraction in KML format.
+The data used in this tutorial is from the Airborne Visible/Infrared Imaging Spectrometer - Next Generation (AVIRIS-NG) sensor, which provides high-resolution hyperspectral imagery (imaging spectroscopy). The specific dataset we are using is from the Silvermine area in the Cape Peninsula, South Africa, collected as part of the BioSCape Campaign (www.bioscape.io) on the 26th November 2023. The ground sample distance (spatial resolution) is 2m. The AVIRIS data are provided in NetCDF format and can be accessed [here](https://popo.jpl.nasa.gov/mmgis-aviris/?mission=BIOSCAPE) (±600MB). If you set the time slider (yellow) to include only the 26 November 2023 and set the coordinates (see target symbol on the bottom-right) to 18,4505 Easting and -34,1128 Southing you should be on the correct tile (named ang20231126t085417_012).
+
+We also have an Area of Interest (AOI) defined as a GeoJSON file and a set of points representing different cover types in KML format.
 
 ## User inputs 
 
@@ -44,6 +48,8 @@ Here we'll set the file paths to where the data are stored. You may need to chan
 aviris_nc <- "/Users/jasper/Documents/Datasets/BioSCape/ANG/CapePeninsula/SilvermineEast/ang20231126t085417_012_L2A_OE_0b4f48b4_RFL_ORT_QL/ang20231126t085417_012_L2A_OE_0b4f48b4_RFL_ORT.nc"
 aoi_geojson <- "data/Silvermine_Hons_2026.geojson"
 points_file <- "data/SilvermineEM.kml" # points for extraction
+mimetes_points <- "data/mimetes_canopy.geojson"
+leucospermum_points <- "data/leucospermum_canopy.geojson"
 ```
 
 ## Read and crop raster to Area of Interest (AOI)
@@ -53,16 +59,16 @@ Here we read in the AVIRIS data and the AOI. Note that I reproject the AOI to ma
 > Why not reproject the AVIRIS data instead? Because it's a very large raster and reprojecting it can be computationally intensive, whereas reprojecting the AOI (which is a smaller vector file) is much faster.
 
 ```{r}
-aviris <- rast(aviris_nc)
-aoi <- project(vect(aoi_geojson), crs(aviris))
+aviris_big <- rast(aviris_nc)
+aoi <- project(vect(aoi_geojson), crs(aviris_big))
 ```
 
 Crop first for speed, then mask to AOI boundary.
 
 ```{r}
 aviris <- mask( # Mask raster by area of interest (AOI) boundary
-  crop(aviris, aoi) # Crop to AOI before masking (more efficient apparently)
-  [[grep("reflectance",names(aviris))]], # keep only reflectance bands for analysis (remove water vapour and aerosol bands); adjust if needed
+  crop(aviris_big, aoi) # Crop to AOI before masking (more efficient apparently)
+  [[grep("reflectance",names(aviris_big))]], # keep only reflectance bands for analysis (remove water vapour and aerosol bands); adjust if needed
   aoi, # AOI - read in as a separate vector file
   filename = "data/aviris_cropped.tif", # save masked raster to disk so R doesn't have to keep it in memory - more efficient
   overwrite = TRUE) # allow overwriting existing file if one already exists
@@ -71,9 +77,9 @@ aviris <- mask( # Mask raster by area of interest (AOI) boundary
 
 # Vegetation indices 
 
-Before we get into hyperspectral analyses, let's calculate some common vegetation indices that can be derived from the AVIRIS-NG data. These are essentially the way you would analyse traditional multispectral data that you get from existing satellite missions like Landsat, MODIS or Sentinal and can be a useful first step to explore the data and identify areas of interest.
+Before we get into hyperspectral analyses, let's calculate some common vegetation indices that can be derived from the AVIRIS-NG data. These are essentially the way you would analyse traditional multispectral data that you get from existing satellite missions like Landsat, MODIS or Sentinel and can be a useful first step to explore the data and identify areas of interest.
 
-First we select the bands we want to use for calculating vegetation indices. The specific band numbers will depend on the wavelength-to-band mapping for your AVIRIS-NG data, which you can find in the metadata/header of your NetCDF file. While each band covers a range of the electromagnetic spectrum, the example below assumes that the NIR band is around 860 nm, the RED band is around 660 nm, the GREEN band is around 550 nm, the SWIR band is around 1240 nm, and the BLUE band is around 450 nm. You would need to update these band numbers based on your specific dataset.
+First, we select the bands we want to use for calculating vegetation indices. The specific band numbers will depend on the wavelength-to-band mapping for your AVIRIS-NG data, which you can find in the metadata/header of your NetCDF file. While each band covers a range of the electromagnetic spectrum, the example below assumes that the NIR band is around 860 nm, the RED band is around 660 nm, the GREEN band is around 550 nm, the SWIR band is around 1240 nm, and the BLUE band is around 450 nm. You would need to update these band numbers based on your specific dataset.
 
 ```{r}
 band_nir <- 98L # see names(aviris)[98]
@@ -100,9 +106,9 @@ plotRGB(c(red, green, blue), stretch = "lin", main = "AVIRIS True Color Composit
 
 Or interactively...
 
-```{r}
+```{r, warnings = FALSE}
 viewRGB(raster::stack(c(red, green, blue)), r = 1, g = 2, b = 3)
-```
+``` 
 
 
 ## Calculate vegetation indices
@@ -110,7 +116,7 @@ viewRGB(raster::stack(c(red, green, blue)), r = 1, g = 2, b = 3)
 Here we calculate the Normalized Difference Vegetation Index (NDVI), the Normalized Difference Water Index (NDWI), and the Enhanced Vegetation Index (EVI) using the appropriate bands from our AVIRIS-NG data. These indices are commonly used in remote sensing to assess vegetation health, water content, and other ecological characteristics.
 
 ```{r}
-# Extract NIR and SWIR bands for index calculations
+# Extract NIR and SWIR bands and calculate indices using raster maths
 nir <- aviris[[band_nir]]
 swir <- aviris[[band_swir]]
 names(nir) <- "nir"
@@ -129,21 +135,25 @@ evi <- 2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1)
 names(evi) <- "EVI"
 
 veg_indices <- c(ndvi, evi, ndwi)
-plot(veg_indices, nc = 3)
+plot(veg_indices, nc = 3) #, range = c(-1,1)) # Plot the indices in a 3-panel plot. Could add a common range of -1 to 1 for all indices, because cover types like the sea and city areas have very high values that would make it hard to see the variation in the vegetation areas if we plotted them with their own ranges.
 ```
 
 Again, these may be more interesting if viewed interactively... Here's EVI, but set to be slightly transparent (see `alpha.regions =`) so we can see the underlying landscape.
 
-You'll see that areas with large shrubs tend to be highlighted with higher EVI.
+You'll see that areas with large shrubs tend to be highlighted with higher NDVI.
 
 ```{r}
+#evi <- clamp(evi, lower = 0, upper = 0.7) # clamp values to 0-0.7 for better visualization if needed
+
 mapview(evi, alpha.regions = 0.4, map.types = "Esri.WorldImagery")
 ```
+
+<br>
 
 In fact, if you choose the right EVI threshold you can do a reasonable job of mapping the large shrubs and wetland areas.
 
 ```{r}
-mapview(app(evi>0.3, as.integer), alpha.regions = 0.35, map.types = "Esri.WorldImagery")
+mapview(app(evi>0.3, as.integer), alpha.regions = 0.4, map.types = "Esri.WorldImagery")
 ```
 
 
@@ -153,11 +163,13 @@ Now let's have a look at some point locations that represent where the two large
 
 The points were collected from high resolution imagery in Google Earth and are stored in a KML file, which we will read into R and reproject to match the coordinate reference system of the AVIRIS data before plotting. Hover your curso over each point to see what cover class it represents.
 
-```{r}
+```{r, warnings = FALSE}
 pts <- project(vect(points_file), crs(aviris))
 
 mapview(pts, label = pts$Name, cex = 5, map.types = "Esri.WorldImagery")
 ```
+
+<br>
 
 Sticking with the "multispectral" and "vegetation index" approach, let's extract the EVI, NDVI and NDWI values at each of the point locations and plot them to see if there are any differences between the different cover classes.
 
@@ -173,15 +185,16 @@ terra::extract(veg_indices, pts) |>
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+<br>
 
 Based on this, you would think you could just bin the NDVI raster into ranges of values to map the large shrubs, low vegetation and a combined class for rock and path.
 
 ```{r}
 # Define a matrix of ranges and numericclass: [from, to, becomes_integer_ID]
-# Values 1-33 -> 1, 33-66 -> 2, 66-100 -> 3
-reclass_matrix <- matrix(c(0.7,  1,  1,
-                           0.4, 0.7,  2,
-                           0, 0.4, 3), 
+reclass_matrix <- matrix(c(0.7,  1,  1, # 1 = shrub
+                           0.4, 0.7,  2, # 2 = low vegetation
+                           0, 0.4, 3, # 3 = rock/path
+                           -1, 0, 4), # 4 = water/sea
                          ncol=3, byrow=TRUE)
 
 # Apply the classification
@@ -194,8 +207,10 @@ plot(rc, main = "Classified by NDVI")
 Or interactively...
 
 ```{r}
-mapview(rc, col.regions = rainbow(3), alpha.regions = 0.35, map.types = "Esri.WorldImagery")
+mapview(rc, col.regions = rainbow(4), alpha.regions = 0.4, map.types = "Esri.WorldImagery")
 ```
+
+<br>
 
 Not bad. The problem is that there is a lot of variation in NDVI values within the same cover class, and there is also overlap between the classes. This is where hyperspectral analyses can be really useful, as they can help to tease apart these differences by looking at the full spectrum of reflectance values rather than just a few indices.
 
@@ -256,15 +271,29 @@ mesma_result <- mesma(aviris, em = spectral_library[,], iterate = 400)
 plot(mesma_result)
 ```
 
-The output is a stack of rasters; one for each endmember (ranging from 0 to 1 to represent fractional cover) and another presenting the Root Mean Square Error (RMSE) of the model fit for each pixel. The RMSE raster can be used to assess the quality of the model fit, with lower values indicating a better fit. 
+The output is a stack of rasters - one for each endmember and another presenting the Root Mean Square Error (RMSE) of the model fit for each pixel. The RMSE raster can be used to assess the quality of the model fit, with lower values indicating a better fit. 
 
 Again, we can visualize the results interactively using `mapview`. Here we will visualize the fractional cover of the `shrub` endmember, which is the one we are most interested in mapping.
 
 ```{r}
-mapview::mapview(mesma_result$shrub, alpha.regions = 0.35, map.types = "Esri.WorldImagery")
+mapview::mapview(mesma_result$shrub, alpha.regions = 0.4, map.types = "Esri.WorldImagery")
 ```
 
-Is this any better than EVI or NDVI? Let's compare the two approaches by plotting the fractional cover of the `shrub` endmember from MESMA against the EVI values for each pixel. 
+<br>
+
+Or if we set a threshold like 0.75 for the fractional cover of the `shrub` endmember, we can create a binary map of where the large shrubs are likely to be present.
+
+```{r}
+shrub <- app(mesma_result$shrub>0.7, as.integer)
+
+mapview(shrub, alpha.regions = 0.4, map.types = "Esri.WorldImagery")
+```
+
+<br>
+
+0.7 is probably a bit conservative, but it is a good starting point and picks up most of the large shrubs or clumps. You can adjust the threshold and see how well it picks up the other shrubs.
+
+Is unmixing any better than EVI or NDVI in this case? Let's compare the two approaches by plotting the fractional cover of the `shrub` endmember from MESMA against the EVI values for each pixel. 
 
 ```{r}
 # Stack rasters and plot pairwise relationships
@@ -273,20 +302,20 @@ pairs(c(mesma_result$shrub, evi, ndvi))
 
 While there's a fair correlation between them, there's also a fair difference between them and the correlation between the two vegetation indices is far stronger than between either and the MESMA estimate of shrub cover. The MESMA approach should able to better differentiate between the different cover classes, as it takes into account the full spectral information rather than just one or a few indices. This should be particularly useful in areas where there is a lot of variation in vegetation types and cover classes, as it allows for a more nuanced understanding of the landscape.
 
-# Differentiating among our shrub species?
+## Differentiating among our shrub species?
 
 Our first goal is to determine if the two species do indeed have unique spectral signatures. One can do this at the leaf level (using leaf spectra collected with a field spectrometer with a leaf clip attachment), or by extracting points from the AVIRIS-NG data that represent pure pixels of each species. The latter is what we have done here, but it is important to note that the spectral signatures extracted from the AVIRIS-NG data may be influenced by factors such as canopy structure, background soil reflectance, and atmospheric effects, which can make it more difficult to differentiate between the two species compared to leaf-level spectra.
 
 Let's get our points for each species, extract and compare.
 
-```{r}
+```{r, warning=FALSE}
 # Get points for each species
-mpts <- vect("data/mimetes_canopy.geojson")
-lpts <- vect("data/leucospermum_canopy.geojson")
+mpts <- vect(mimetes_points)
+lpts <- vect(leucospermum_points)
 cpts <- rbind(mpts, lpts) # combine into one vector object
 
 # Extract spectra for each species
-spectra_species <- terra::extract(aviris, cpts) |>
+spectra_species <- terra::extract(aviris_big, cpts) |> # Note that I extract from the full AVIRIS-NG data here, rather than the cropped version, because some points are outside of the cropped area. This is a good example of why it is important to check your data and make sure that your points are within the area of interest before cropping or masking your raster data.
   mutate(Species = cpts$Name) |>
   na.omit()
 
@@ -309,7 +338,9 @@ spectra_species |>
   xlab("Wavelength (nm)")
 ```
 
-Pretty similar... Another approach is to do a Principal Component Analysis (PCA) on the spectra to see if the two species can be separated in the PCA space.
+Quite a different shape, with _Mimetes_ having a steeper "red edge" at ~700nm (the transition from red to the near infrared (NIR) region), and higher reflectance in the near infrared (NIR) region (700-1400 nm), but lower reflectance in the short wave infrared (SWIR) region (1500-2500 nm), which is promising for our ability to differentiate between them using hyperspectral data.
+
+Another approach is to do a Principal Component Analysis (PCA) on the spectra to see if the two species can be separated in the PCA space.
 
 ```{r}
 # Do PCA
@@ -322,7 +353,7 @@ hyp.pca <- prcomp(spectra_species |> select(starts_with("reflectance")), center 
 pca_data <- augment(hyp.pca, spectra_species$Species)
 
 # Plot with ellipses
-ggplot(pca_data, aes(x = .fittedPC1, y = .fittedPC2, color = Species)) +
+pca_data |> ggplot(aes(x = .fittedPC1, y = .fittedPC2, color = data)) +
   geom_point() +
   stat_ellipse() + # Adds 95% confidence ellipses
   theme_minimal() +
@@ -330,4 +361,42 @@ ggplot(pca_data, aes(x = .fittedPC1, y = .fittedPC2, color = Species)) +
        x = "PC1",
        y = "PC2")
 ```
+
+## MESMA on "shrub" pixels only?
+
+Again, we can use spectral mixture analysis to estimate the fractional cover of each species in each pixel, but this time we will focus on the pixels that are classified as "shrub" from the previous MESMA run. This will allow us to focus on the areas where we know there are shrubs and see if we can differentiate between the two species.
+
+```{r}
+# Select the first spectrum from each class for our spectral library
+spectra_species[c(1,6),] |>
+  remove_rownames() |>
+  column_to_rownames(var = "Species") |>
+  select(starts_with("reflectance")) -> spp_spectral_library
+
+# Mask AVIRIS imagery to only include pixels that are classified as "shrub" from the previous MESMA run. This will allow us to focus on the areas where we know there are shrubs and see if we can differentiate between the two species.
+aviris_shrub <- mask(aviris, shrub, maskvalue = 0)
+
+# Run MESMA
+shrub_mesma_result <- mesma(aviris_shrub, em = spp_spectral_library[,], iterate = 400)
+
+plot(shrub_mesma_result)
+```
+
+We can't really tell much from that, because the pixels are tiny and we can't see if they display low or high fractional cover values. If we have a look at a histogram of the fractional cover of each species, we can see that there is a lot of variation, but mostly the _Mimetes_ had higher fractional cover.
+
+```{r}
+hist(shrub_mesma_result[[c(1,2)]])
+```
+
+Most pixels will have a high fractional cover of one species and a low fractional cover of the other species, which is promising for our ability to differentiate between them. We can create a binary map of where _Mimetes_ is more abundant than _Leucospermum_ and vice versa, which will allow us to see if there are any spatial patterns in the distribution of the two species.
+
+```{r}
+plot(shrub_mesma_result$Mimetes > shrub_mesma_result$Leucospermum, legend = FALSE, main = "Mimetes (yellow) vs Leucospermum (purple)")
+```
+
+```{r}
+plot(shrub_mesma_result$Mimetes < shrub_mesma_result$Leucospermum, legend = FALSE, main = "Mimetes (purple) vs Leucospermum (yellow)")
+```
+
+Unfortunately, we don't have enough field data to do a proper validation analysis and see if our results are any good...
 
