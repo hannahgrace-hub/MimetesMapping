@@ -52,5 +52,5 @@ rsconnect/
 data/aviris_*
 data/silvermine 1.las
 
-# Ignore all files in any directory named temp
+# Ignore file
 index_files/
