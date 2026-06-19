@@ -52,5 +52,3 @@ rsconnect/
 data/aviris_*
 data/silvermine 1.las
 
-# Ignore file
-index_files/
